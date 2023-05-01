@@ -1,8 +1,9 @@
 from enum import Enum
-
-from fastapi import FastAPI
-from pydantic import BaseModel
 from typing import Union
+
+from fastapi import FastAPI, Query
+from pydantic import BaseModel
+from typing_extensions import Annotated
 
 app = FastAPI()
 
@@ -17,7 +18,7 @@ class Item(BaseModel):
 
 class RequestBody(BaseModel):
     name: str
-    description: Union[str,  None] = None
+    description: Union[str, None] = None
     price: float
     tax: Union[float, None] = None
 
@@ -76,8 +77,11 @@ async def create_or_update_item(item_id: int, item: RequestBody, q: Union[str, N
 
 
 @app.get("/items/")
-async def read_items(skip: int = 0, limit: int = 10):
-    return fake_items_db[skip: skip + limit]
+async def read_items(q: Annotated[Union[str, None], Query(min_length=5, max_length=20)] = ...):
+    results = {"items": fake_items_db}
+    if q:
+        results.update({"q": q})
+    return results
 
 
 @app.post("/items/")
@@ -103,7 +107,7 @@ async def get_item_types(item_type: ItemType):
 async def read_file(file_path: str):
     return {"file_path": file_path}
 
+
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
     read_root()
-
