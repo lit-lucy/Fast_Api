@@ -1,7 +1,8 @@
-from typing import Union
+from enum import Enum
+
 from fastapi import FastAPI
 from pydantic import BaseModel
-from enum import Enum
+from typing import Union
 
 app = FastAPI()
 
@@ -12,6 +13,13 @@ class Item(BaseModel):
     name: str
     price: float
     is_offer: Union[bool, None] = None
+
+
+class RequestBody(BaseModel):
+    name: str
+    description: Union[str,  None] = None
+    price: float
+    tax: Union[float, None] = None
 
 
 class ItemType(str, Enum):
@@ -60,13 +68,25 @@ async def read_item(item_id: str, needy: str, skip: int = 0, q: Union[str, None]
 
 
 @app.put("/items/{item_id}")
-async def update_item(item_id: int, item: Item):
-    return {"item_price": item.price, "item_id": item_id}
+async def create_or_update_item(item_id: int, item: RequestBody, q: Union[str, None] = None):
+    result = {"item_id": item_id, **item.dict()}
+    if q:
+        result.update({"q": q})
+    return result
 
 
 @app.get("/items/")
 async def read_items(skip: int = 0, limit: int = 10):
     return fake_items_db[skip: skip + limit]
+
+
+@app.post("/items/")
+async def create_item(item: RequestBody):
+    item_dict = item.dict()
+    if item.tax:
+        price_with_tax = item.price + item.tax
+        item_dict.update({"price_with_tax": price_with_tax})
+    return item_dict
 
 
 @app.get("/types/{item_type}")
