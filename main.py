@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Union
+from typing import Union, List
 
 from fastapi import FastAPI, Query
 from pydantic import BaseModel
@@ -77,7 +77,13 @@ async def create_or_update_item(item_id: int, item: RequestBody, q: Union[str, N
 
 
 @app.get("/items/")
-async def read_items(q: Annotated[Union[str, None], Query(min_length=5, max_length=20)] = ...):
+async def read_items(
+        q: Annotated[Union[List[str], None], Query(title="Query list",
+                                                   description="Takes several queries, min length validation "
+                                                               "only works in OpenAPI",
+                                                   alias="item-query-list",
+                                                   deprecated=True,
+                                                   min_length=2)] = ["item1", "item2"]):
     results = {"items": fake_items_db}
     if q:
         results.update({"q": q})
