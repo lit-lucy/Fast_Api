@@ -1,8 +1,10 @@
+from datetime import datetime, time, timedelta
 from enum import Enum
-from typing import Union, List
+from typing import Union, List, Dict, Any
+from uuid import UUID
 
-from fastapi import FastAPI, Query, Path
-from pydantic import BaseModel
+from fastapi import FastAPI, Query, Path, Body, Cookie, Header
+from pydantic import BaseModel, Field, HttpUrl, EmailStr
 from typing_extensions import Annotated
 
 app = FastAPI()
@@ -10,17 +12,61 @@ app = FastAPI()
 fake_items_db = [{"item_name": "Foo"}, {"item_name": "Bar"}, {"item_name": "Baz"}]
 
 
+class Image(BaseModel):
+    url: HttpUrl
+    name: str
+
+
 class Item(BaseModel):
     name: str
-    price: float
-    is_offer: Union[bool, None] = None
+    description: Union[str, None] = Field(
+        default=None, title="The description of the item", max_length=300
+    )
+    price: float = Field(gt=0, description="The price must be greater than zero")
+    tax: Union[float, None] = None
+    images: Union[List[Image], None] = None
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "name": "Foo",
+                "description": "A very nice Item",
+                "price": 35.4,
+                "tax": 3.2,
+                "images": [
+                    {
+                        "url": "http://example.com/baz.jpg",
+                        "name": "The Foo live"
+                    },
+                    {
+                        "url": "http://example.com/dave.jpg",
+                        "name": "The Baz"
+                    }
+                ]
+            }
+        }
 
 
-class RequestBody(BaseModel):
+class Offer(BaseModel):
     name: str
     description: Union[str, None] = None
     price: float
-    tax: Union[float, None] = None
+    items: List[Item]
+
+
+class User(BaseModel):
+    username: str
+    full_name: Union[str, None] = None
+
+
+class BaseUser(BaseModel):
+    username: str
+    email: EmailStr
+    full_name: Union[str, None] = None
+
+
+class UserIn(BaseUser):
+    password: str
 
 
 class ItemType(str, Enum):
@@ -32,6 +78,29 @@ class ItemType(str, Enum):
 @app.get("/")
 async def read_root():
     return {"Hello": "Items"}
+
+
+@app.post("/offers/")
+async def create_offer(offer: Offer):
+    return offer
+
+
+@app.post("/images/multiple")
+async def create_multiple_images(images: List[Image]):
+    for image in images:
+        image.url = image.url + " is nice"
+    return images
+
+
+# Accept any dict as long as it has int keys and values of float type
+@app.post("/index-weights/")
+async def create_index_weights(weights: Dict[int, float]):
+    return weights
+
+
+@app.post("/user/")
+async def create_user(user: UserIn) -> BaseUser:
+    return user
 
 
 @app.get("/users/me")
@@ -58,7 +127,7 @@ async def read_user_item(
     return item
 
 
-@app.get("/items/{item_id}")
+@app.get("/items/{item_id}", response_model=Item, response_model_exclude_unset=True)
 async def read_item(
         size: Annotated[float, Query(gt=0, lt=10.5)],
         # gt: greater than, le: less than or equal
@@ -72,35 +141,61 @@ async def read_item(
     return results
 
 
+# "importance" parameter will be added to request body
 @app.put("/items/{item_id}")
-async def create_or_update_item(item_id: int, item: RequestBody, q: Union[str, None] = None):
-    result = {"item_id": item_id, **item.dict()}
-    if q:
-        result.update({"q": q})
-    return result
+async def create_or_update_item(
+        item_id: UUID,
+        start_datetime: Annotated[Union[datetime, None], Body()] = None,
+        end_datetime: Annotated[Union[datetime, None], Body()] = None,
+        repeat_at: Annotated[Union[time, None], Body()] = None,
+        process_after: Annotated[Union[timedelta, None], Body()] = None,
+):
+    start_process = start_datetime + process_after
+    duration = end_datetime - start_process
+    return {
+        "item_id": item_id,
+        "start_datetime": start_datetime,
+        "end_datetime": end_datetime,
+        "repeat_at": repeat_at,
+        "process_after": process_after,
+        "start_process": start_process,
+        "duration": duration
+    }
 
 
-@app.get("/items/")
-async def read_items(
-        q: Annotated[Union[List[str], None], Query(title="Query list",
-                                                   description="Takes several queries, min length validation "
-                                                               "only works in OpenAPI",
-                                                   alias="item-query-list",
-                                                   deprecated=True,
-                                                   min_length=2)] = ["item1", "item2"]):
-    results = {"items": fake_items_db}
-    if q:
-        results.update({"q": q})
+# embed=True will include "item" in the schema in the request body
+@app.put("/items/{item_id}/without_user")
+async def update_item(item_id: int, item: Annotated[Item, Body(embed=True)]):
+    results = {"item_id": item_id, "item": item}
     return results
 
 
-@app.post("/items/")
-async def create_item(item: RequestBody):
+@app.get("/items/", response_model=List[Item])
+async def read_items(
+        q: Annotated[Union[List[str], None],
+        Query(title="Query list", description="Takes several queries, min length validation "
+                                              "only works in OpenAPI",
+              alias="item-query-list", deprecated=True, min_length=2)] = ["item1", "item2"],
+        ads_id: Annotated[Union[str, None], Cookie()] = None,
+        user_agent: Annotated[Union[str, None], Header()] = None,
+        x_token: Annotated[Union[List[str], None], Header()] = None
+) -> Any:
+    results = {"items": fake_items_db, "ads_id": ads_id, "User-Agent": user_agent, "X-Token values": x_token}
+    if q:
+        results.update({"q": q})
+    return [
+        Item(name="Portal Gun", price=42.0),
+        Item(name="Pure", price=39.0),
+    ]
+
+
+@app.post("/items/", response_model=Item)
+async def create_item(item: Item) -> Any:
     item_dict = item.dict()
     if item.tax:
         price_with_tax = item.price + item.tax
         item_dict.update({"price_with_tax": price_with_tax})
-    return item_dict
+    return item
 
 
 @app.get("/types/{item_type}")
